@@ -1,0 +1,1271 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>黄金账本 · 持仓均价与实时金价</title>
+<meta name="theme-color" content="#0b0d11">
+<meta name="description" content="记录每笔黄金买卖，自动算持仓均价、浮动盈亏，实时金价一目了然。">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="黄金账本">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#0b0d11;--card:#151920;--card2:#1b2029;--line:#262d39;--line2:#313a48;
+  --txt:#e9edf4;--dim:#8d97a9;--dim2:#626c7e;
+  --gold:#e8b84b;--gold-soft:#f3d68f;--up:#f2544b;--dn:#3fb950;
+  --r:16px;--r2:12px;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(900px 420px at 50% -8%,rgba(232,184,75,.10),transparent 62%),
+    var(--bg);
+  color:var(--txt);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  min-height:100vh;
+  padding:0 14px calc(104px + var(--safe-b));
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:720px;margin:0 auto}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+
+/* ---------- top bar ---------- */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:18px 2px 12px;gap:10px;
+}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:.02em}
+.logo{
+  width:30px;height:30px;border-radius:9px;display:grid;place-items:center;
+  background:linear-gradient(145deg,#f0cb72,#c9962f);
+  color:#231a06;font:700 13px/1 Georgia,serif;letter-spacing:0;
+  box-shadow:0 2px 10px rgba(232,184,75,.28);
+}
+.actions{display:flex;gap:8px}
+.icon-btn{
+  width:36px;height:36px;border-radius:11px;display:grid;place-items:center;
+  background:var(--card);border:1px solid var(--line);color:var(--dim);
+  font-size:15px;transition:.15s;
+}
+.icon-btn:active{transform:scale(.94)}
+.icon-btn.on{color:var(--gold);border-color:rgba(232,184,75,.45)}
+
+/* ---------- cards ---------- */
+.card{
+  background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0)) , var(--card);
+  border:1px solid var(--line);border-radius:var(--r);
+}
+.sec-title{
+  display:flex;align-items:center;justify-content:space-between;
+  margin:22px 2px 10px;font-size:13px;color:var(--dim);letter-spacing:.04em;
+}
+.sec-title b{font-weight:600;color:var(--txt);font-size:14px;letter-spacing:0}
+
+/* ---------- price ---------- */
+.price-card{padding:16px 16px 14px;position:relative;overflow:hidden}
+.price-card::after{
+  content:"";position:absolute;right:-40px;top:-60px;width:160px;height:160px;
+  background:radial-gradient(circle,rgba(232,184,75,.16),transparent 70%);pointer-events:none;
+}
+.pc-top{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--dn);box-shadow:0 0 0 3px rgba(63,185,80,.15)}
+.dot.err{background:var(--up);box-shadow:0 0 0 3px rgba(242,84,75,.15)}
+.dot.busy{background:var(--gold);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.3}}
+.pc-price{display:flex;align-items:baseline;gap:6px;margin:6px 0 2px}
+.pc-price .v{font-size:40px;font-weight:680;letter-spacing:-.02em;
+  color:var(--gold);
+  background:linear-gradient(180deg,#fff8e6,var(--gold));
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+  font-variant-numeric:tabular-nums;line-height:1.08}
+.pc-price .u{font-size:14px;color:var(--dim)}
+.pc-sub{font-size:12.5px;color:var(--dim2);display:flex;flex-wrap:wrap;gap:4px 12px}
+.pc-sub .k{color:var(--dim)}
+
+/* ---------- stats ---------- */
+.stats{margin-top:12px;display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.stat{padding:13px 14px;border-radius:var(--r2);background:var(--card);border:1px solid var(--line)}
+.stat .k{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:4px}
+.stat .v{font-size:19px;font-weight:640;margin-top:3px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.stat.hero{grid-column:1/-1;background:linear-gradient(120deg,rgba(232,184,75,.14),rgba(232,184,75,.03)),var(--card);
+  border-color:rgba(232,184,75,.26)}
+.stat.hero .v{font-size:30px;color:var(--gold-soft)}
+.stat.wide{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.stat.wide .v{margin-top:0}
+.stat .s{font-size:12px;color:var(--dim2);margin-top:2px}
+.up{color:var(--up)}.dn{color:var(--dn)}.flat{color:var(--dim)}
+
+/* ---------- chart ---------- */
+.chart-card{padding:10px 8px 6px}
+#chart{display:block;width:100%;height:auto}
+#chart .empty{
+  padding:44px 18px;text-align:center;color:var(--dim2);font-size:13px;line-height:1.8;
+}
+#chart .empty .mini{color:var(--gold-soft);font-size:15px}
+
+/* ---------- records ---------- */
+.rec{
+  display:flex;align-items:center;gap:12px;padding:12px 14px;
+  border-bottom:1px solid var(--line);
+}
+.rec:last-child{border-bottom:0}
+.rec .tag{
+  flex:0 0 auto;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;
+  font-size:12px;font-weight:600;
+}
+.rec.buy .tag{background:rgba(242,84,75,.13);color:var(--up)}
+.rec.sell .tag{background:rgba(63,185,80,.13);color:var(--dn)}
+.rec .main{flex:1;min-width:0}
+.rec .l1{display:flex;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
+.rec .l1>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec .l1 .amt{font-weight:600;white-space:nowrap;flex:0 0 auto}
+.rec .l2{font-size:12.5px;color:var(--dim2);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap}
+.rec .ops{display:flex;gap:2px;flex:0 0 auto}
+.rec .ops button{padding:6px 7px;border-radius:8px;color:var(--dim2);font-size:13px}
+.rec .ops button:active{background:var(--card2)}
+.empty-box{padding:34px 16px;text-align:center;color:var(--dim2);font-size:13px;line-height:1.9}
+
+/* ---------- fab ---------- */
+.fab{
+  position:fixed;right:calc(50% - 360px + 18px);bottom:calc(22px + var(--safe-b));
+  width:56px;height:56px;border-radius:50%;display:grid;place-items:center;
+  background:linear-gradient(145deg,#f2cf7a,#caa032);color:#241a04;
+  font-size:27px;font-weight:300;line-height:1;
+  box-shadow:0 8px 24px rgba(232,184,75,.34),0 2px 6px rgba(0,0,0,.4);
+  transition:.15s;z-index:20;
+}
+@media(max-width:760px){.fab{right:18px;bottom:calc(20px + var(--safe-b))}}
+.fab:active{transform:scale(.93)}
+
+/* ---------- modal ---------- */
+.modal{
+  position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center;
+  background:rgba(0,0,0,.55);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+  animation:fade .16s ease;
+}
+.modal[hidden]{display:none}
+@keyframes fade{from{opacity:0}}
+.sheet{
+  width:100%;max-width:520px;max-height:92vh;overflow-y:auto;overscroll-behavior:contain;
+  background:var(--card);border:1px solid var(--line);border-bottom:0;
+  border-radius:22px 22px 0 0;padding:0 0 calc(18px + var(--safe-b));
+  animation:slide .22s cubic-bezier(.22,1,.36,1);
+}
+@keyframes slide{from{transform:translateY(28px);opacity:.6}}
+@media(min-width:600px){
+  .modal{align-items:center}
+  .sheet{border-radius:20px;border-bottom:1px solid var(--line);max-height:86vh;padding-bottom:18px}
+}
+.sheet-head{
+  position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;
+  padding:16px 18px 12px;background:var(--card);
+  border-bottom:1px solid var(--line);
+}
+.sheet-head h2{margin:0;font-size:16px;font-weight:620}
+.sheet-body{padding:16px 18px 0}
+.field{display:block;margin-bottom:12px}
+.field>span{display:block;font-size:12.5px;color:var(--dim);margin-bottom:6px}
+.field input,.field select{
+  width:100%;padding:12px 13px;border-radius:11px;background:var(--card2);
+  border:1px solid var(--line);outline:none;font-size:16px;
+  transition:border-color .15s,background .15s;
+}
+.field input:focus,.field select:focus{border-color:rgba(232,184,75,.55);background:#1e2430}
+.field input::placeholder{color:var(--dim2)}
+.field .hint{font-size:11.5px;color:var(--dim2);margin-top:5px;line-height:1.55}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--card2);padding:4px;border-radius:12px;margin-bottom:14px}
+.seg-btn{padding:10px;border-radius:9px;font-size:14px;color:var(--dim);transition:.15s;font-weight:500}
+.seg-btn.active{background:var(--line2);color:var(--txt);font-weight:600}
+.seg-btn[data-side=buy].active{background:rgba(242,84,75,.2);color:#ff8079}
+.seg-btn[data-side=sell].active{background:rgba(63,185,80,.2);color:#63d47c}
+.sheet-foot{display:flex;gap:10px;padding:16px 18px 0;position:sticky;bottom:0;background:linear-gradient(180deg,transparent,var(--card) 18%)}
+.btn{
+  flex:1;padding:13px;border-radius:12px;font-size:15px;font-weight:600;text-align:center;
+  background:var(--card2);border:1px solid var(--line);transition:.15s;
+}
+.btn:active{transform:scale(.985)}
+.btn.primary{background:linear-gradient(145deg,#f2cf7a,#caa032);color:#241a04;border-color:transparent}
+.btn.danger{color:var(--up);border-color:rgba(242,84,75,.3);background:rgba(242,84,75,.08)}
+.btn.ghost{background:none}
+.btn.sm{flex:0 0 auto;padding:9px 14px;font-size:13px;border-radius:10px}
+.group{margin:20px 0 8px;font-size:12px;color:var(--dim);letter-spacing:.06em;font-weight:600}
+.divider{height:1px;background:var(--line);margin:16px 0}
+
+/* ---------- toast ---------- */
+#toast{
+  position:fixed;left:50%;bottom:calc(96px + var(--safe-b));transform:translate(-50%,10px);
+  background:#232a35;border:1px solid var(--line2);color:var(--txt);
+  padding:11px 18px;border-radius:12px;font-size:13.5px;z-index:99;
+  opacity:0;pointer-events:none;transition:.22s;max-width:86vw;text-align:center;
+  box-shadow:0 8px 28px rgba(0,0,0,.45);
+}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+.badge{font-size:11px;padding:2px 7px;border-radius:6px;background:var(--card2);color:var(--dim);border:1px solid var(--line)}
+.badge:empty{display:none}
+.badge.warn{background:rgba(242,84,75,.12);color:#ff8f88;border-color:rgba(242,84,75,.25)}
+.disclaimer{text-align:center;color:var(--dim2);font-size:11.5px;margin:22px 0 0;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand"><span class="logo">Au</span>黄金账本</div>
+    <div class="actions">
+      <button class="icon-btn" id="btnSync" title="云同步">☁</button>
+      <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
+    </div>
+  </div>
+
+  <!-- 实时金价 -->
+  <section class="card price-card">
+    <div class="pc-top">
+      <span class="dot" id="priceDot"></span>
+      <span id="priceState">—</span>
+      <span style="flex:1"></span>
+      <button class="badge" id="btnRefresh" style="cursor:pointer;color:var(--gold);border-color:rgba(232,184,75,.3)">刷新</button>
+    </div>
+    <div class="pc-price">
+      <span class="v" id="price">—</span>
+      <span class="u">元 / 克</span>
+    </div>
+    <div class="pc-sub">
+      <span><span class="k">来源</span> <span id="priceSrc">—</span></span>
+      <span><span class="k">更新</span> <span id="priceTime">—</span></span>
+      <span id="priceRef"></span>
+    </div>
+  </section>
+
+  <!-- 统计 -->
+  <section class="stats" id="stats">
+    <div class="stat hero">
+      <div class="k">持仓均价 <span class="badge" id="avgHint"></span></div>
+      <div class="v" id="sAvg">—</div>
+      <div class="s" id="sAvgSub">—</div>
+    </div>
+    <div class="stat">
+      <div class="k">持有克重</div>
+      <div class="v" id="sGrams">—</div>
+      <div class="s" id="sGramsSub">—</div>
+    </div>
+    <div class="stat">
+      <div class="k">持仓成本</div>
+      <div class="v" id="sCost">—</div>
+      <div class="s" id="sCostSub">—</div>
+    </div>
+    <div class="stat">
+      <div class="k">当前市值</div>
+      <div class="v" id="sValue">—</div>
+      <div class="s" id="sValueSub">—</div>
+    </div>
+    <div class="stat">
+      <div class="k">浮动盈亏</div>
+      <div class="v" id="sUnreal">—</div>
+      <div class="s" id="sUnrealSub">—</div>
+    </div>
+    <div class="stat wide">
+      <div class="k">已实现盈亏</div>
+      <div class="v" id="sReal">—</div>
+      <div class="s" id="sRealSub">—</div>
+    </div>
+  </section>
+
+  <!-- 走势 -->
+  <div class="sec-title"><b>金价走势</b><span id="chartHint">本地采样</span></div>
+  <section class="card chart-card"><div id="chart"></div></section>
+
+  <!-- 记录 -->
+  <div class="sec-title"><b>交易记录</b><span id="recCount">0 笔</span></div>
+  <section class="card" id="recBox">
+    <div class="empty-box" id="recEmpty">
+      还没有记录<br>
+      点右下角 <b style="color:var(--gold)">+</b> 记下第一笔买入
+    </div>
+    <div id="recList"></div>
+  </section>
+
+  <p class="disclaimer">数据保存在本机浏览器 · 金价仅供参考，不构成投资建议</p>
+</div>
+
+<button class="fab" id="fab" aria-label="添加记录">+</button>
+
+<!-- 记录弹窗 -->
+<div class="modal" id="modalRec" hidden>
+  <div class="sheet">
+    <div class="sheet-head">
+      <h2 id="recTitle">添加记录</h2>
+      <button class="icon-btn" data-close="modalRec" style="width:30px;height:30px">✕</button>
+    </div>
+    <form id="formRec" autocomplete="off">
+      <div class="sheet-body">
+        <input type="hidden" id="rId">
+        <div class="seg">
+          <button type="button" class="seg-btn active" data-side="buy">买入</button>
+          <button type="button" class="seg-btn" data-side="sell">卖出</button>
+        </div>
+        <label class="field"><span>日期</span><input id="rDate" type="date"></label>
+        <div class="row2">
+          <label class="field"><span>克重（g）</span><input id="rGrams" inputmode="decimal" placeholder="0.000"></label>
+          <label class="field"><span>单价（元/克）</span><input id="rPrice" inputmode="decimal" placeholder="0.00"></label>
+        </div>
+        <label class="field"><span>总金额（元）</span>
+          <input id="rAmount" inputmode="decimal" placeholder="0.00">
+          <div class="hint">克重 / 单价 / 总金额，填任意两个，第三个自动算</div>
+        </label>
+        <label class="field"><span>手续费（元，可选）</span><input id="rFee" inputmode="decimal" placeholder="0"></label>
+        <label class="field"><span>备注（可选）</span><input id="rNote" maxlength="60" placeholder="如：建行金条 / 工行积存金 / 周大福"></label>
+      </div>
+      <div class="sheet-foot">
+        <button type="button" class="btn ghost" data-close="modalRec">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 设置弹窗 -->
+<div class="modal" id="modalSet" hidden>
+  <div class="sheet">
+    <div class="sheet-head">
+      <h2>设置</h2>
+      <button class="icon-btn" data-close="modalSet" style="width:30px;height:30px">✕</button>
+    </div>
+    <div class="sheet-body">
+
+      <div class="group">金价来源</div>
+      <label class="field"><span>数据源</span>
+        <select id="sSource">
+          <option value="auto">自动 · 国际金价折算人民币</option>
+          <option value="proxy">自动 · 自定义代理（国内金价推荐）</option>
+          <option value="manual">手动填写金价</option>
+        </select>
+        <div class="hint" id="srcHint"></div>
+      </label>
+      <div id="boxManual" hidden>
+        <label class="field"><span>当前金价（元/克）</span><input id="sManual" inputmode="decimal" placeholder="如 880"></label>
+      </div>
+      <div id="boxProxy" hidden>
+        <label class="field"><span>代理接口地址</span><input id="sProxy" placeholder="https://xxx.workers.dev/" inputmode="url">
+          <div class="hint">用仓库里的 <b>worker/gold-price-proxy.js</b> 免费部署一个 Cloudflare Worker，把地址填这里。</div>
+        </label>
+      </div>
+      <div id="boxAuto">
+        <div class="row2">
+          <label class="field"><span>折算加价（元/克）</span><input id="sPremium" inputmode="decimal" placeholder="0">
+            <div class="hint">国内实售价常高于国际折算价</div>
+          </label>
+          <label class="field"><span>美元兑人民币</span><input id="sUsdCny" inputmode="decimal" placeholder="自动">
+            <div class="hint">留空则自动获取汇率</div>
+          </label>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="group">云同步（多设备共用一份数据）</div>
+      <label class="field"><span>GitHub Token（只需 gist 权限）</span>
+        <input id="sToken" type="password" placeholder="github_pat_..." autocomplete="off">
+        <div class="hint">在 GitHub → Settings → Developer settings → Personal access tokens 生成，仅勾选 <b>gist</b>。Token 只存在本机浏览器里。</div>
+      </label>
+      <label class="field"><span>Gist ID</span>
+        <input id="sGist" placeholder="留空则点下面「创建」自动生成" autocomplete="off">
+      </label>
+      <div class="row2" style="margin-bottom:12px">
+        <button type="button" class="btn sm" id="btnGistCreate" style="flex:1">新建云存档</button>
+        <button type="button" class="btn sm" id="btnGistSync" style="flex:1">立即同步</button>
+      </div>
+      <label class="field" style="display:flex;align-items:center;gap:9px;margin-bottom:4px">
+        <input type="checkbox" id="sAutoSync" style="width:20px;height:20px;padding:0;flex:0 0 auto;accent-color:#e8b84b">
+        <span style="margin:0;font-size:14px;color:var(--txt)">改动后自动同步</span>
+      </label>
+
+      <div class="divider"></div>
+      <div class="group">数据</div>
+      <div class="row2" style="margin-bottom:10px">
+        <button type="button" class="btn sm" id="btnExport" style="flex:1">导出备份</button>
+        <button type="button" class="btn sm" id="btnImport" style="flex:1">导入备份</button>
+      </div>
+      <div class="row2" style="margin-bottom:10px">
+        <button type="button" class="btn sm" id="btnCsv" style="flex:1">导出 CSV</button>
+        <button type="button" class="btn sm danger" id="btnClear" style="flex:1">清空数据</button>
+      </div>
+      <input type="file" id="fileImport" accept=".json,application/json" hidden>
+
+      <div class="sheet-foot" style="padding-left:0;padding-right:0">
+        <button type="button" class="btn ghost" data-close="modalSet">关闭</button>
+        <button type="button" class="btn primary" id="btnSaveSet">保存设置</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* =========================================================
+   黄金账本 — 单文件离线应用
+   数据：localStorage（可选 GitHub Gist 云同步）
+   ========================================================= */
+(function () {
+  'use strict';
+
+  /* ---------------- 常量 ---------------- */
+  var K = {
+    rec:  'gl.records.v1',
+    set:  'gl.settings.v1',
+    hist: 'gl.history.v1',
+    meta: 'gl.meta.v1',
+    sync: 'gl.sync.v1',
+    spot: 'gl.spot.v1'
+  };
+  var OZ = 31.1034768;          // 1 金衡盎司 = 31.1034768 克
+  var GIST_FILE = 'gold-ledger.json';
+  var SAMPLE_GAP = 10 * 60 * 1000;   // 金价采样最小间隔
+
+  var DEFAULT_SET = {
+    source: 'auto',
+    manual: 0,
+    proxy: '',
+    premium: 0,
+    usdCny: 0
+  };
+
+  /* ---------------- 小工具 ---------------- */
+  function $(s, r) { return (r || document).querySelector(s); }
+  function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  function num(v) {
+    if (typeof v === 'number') return isFinite(v) ? v : 0;
+    var n = parseFloat(String(v == null ? '' : v).replace(/[,\s¥￥%]/g, ''));
+    return isFinite(n) ? n : 0;
+  }
+  function fmt(n, d) {
+    n = isFinite(n) ? n : 0;
+    return n.toLocaleString('zh-CN', { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function money(n) { return '¥' + fmt(n, 2); }
+  function gfmt(n) {
+    var s = fmt(n, 3);
+    if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+    return s;
+  }
+  function signed(n, d) {
+    var s = fmt(Math.abs(n), d == null ? 2 : d);
+    if (n > 0.0000001) return '+' + s;
+    if (n < -0.0000001) return '-' + s;
+    return s;
+  }
+  function pct(n) {
+    if (!isFinite(n)) return '';
+    return (n > 0 ? '+' : '') + fmt(n * 100, 2) + '%';
+  }
+  function todayStr() {
+    var d = new Date(), p = function (x) { return x < 10 ? '0' + x : '' + x; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function readLS(k, fb) {
+    try { var s = localStorage.getItem(k); return s == null ? fb : JSON.parse(s); }
+    catch (e) { return fb; }
+  }
+  function writeLS(k, v) {
+    try { localStorage.setItem(k, JSON.stringify(v)); return true; }
+    catch (e) { toast('本地存储失败：' + e.message); return false; }
+  }
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+  }
+  function timeAgo(ts) {
+    if (!ts) return '—';
+    var s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (s < 45) return '刚刚';
+    if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+    if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+    if (s < 86400 * 30) return Math.floor(s / 86400) + ' 天前';
+    var d = new Date(ts), p = function (x) { return x < 10 ? '0' + x : '' + x; };
+    return (d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function fetchJSON(url, opts, ms) {
+    var ctl = new AbortController();
+    var timer = setTimeout(function () { ctl.abort(); }, ms || 12000);
+    return fetch(url, Object.assign({ signal: ctl.signal, cache: 'no-store' }, opts || {}))
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (d) { clearTimeout(timer); return d; },
+            function (e) { clearTimeout(timer); throw e; });
+  }
+
+  /* ---------------- 状态 ---------------- */
+  var state = {
+    records: readLS(K.rec, []) || [],
+    settings: Object.assign({}, DEFAULT_SET, readLS(K.set, {}) || {}),
+    hist: readLS(K.hist, []) || [],
+    sync: Object.assign({ token: '', gistId: '', auto: true }, readLS(K.sync, {}) || {}),
+    meta: Object.assign({ updatedAt: 0 }, readLS(K.meta, {}) || {}),
+    spot: readLS(K.spot, null),
+    busy: false,
+    err: ''
+  };
+  if (!Array.isArray(state.records)) state.records = [];
+  if (!Array.isArray(state.hist)) state.hist = [];
+  var stats = null;
+
+  /* ---------------- 计算 ---------------- */
+  function computeStats() {
+    var rs = state.records.slice().sort(function (a, b) {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
+    var g = 0, cost = 0, realized = 0;
+    var buyG = 0, buyAmt = 0, sellG = 0, sellAmt = 0, overSold = false;
+
+    rs.forEach(function (r) {
+      var gg = num(r.grams), p = num(r.price), fee = num(r.fee);
+      if (gg <= 0) return;
+      if (r.side === 'buy') {
+        g += gg;
+        cost += gg * p + fee;
+        buyG += gg;
+        buyAmt += gg * p + fee;
+      } else {
+        if (gg > g + 1e-9) overSold = true;
+        var sold = Math.min(gg, g);
+        var avg = g > 0 ? cost / g : 0;
+        realized += sold * p - (gg > 0 ? fee * (sold / gg) : 0) - sold * avg;
+        cost -= sold * avg;
+        g -= sold;
+        sellG += gg;
+        sellAmt += gg * p - fee;
+      }
+      if (g < 1e-9) { g = 0; cost = 0; }
+    });
+
+    var spot = state.spot && state.spot.cny > 0 ? state.spot.cny : 0;
+    var avgCost = g > 0 ? cost / g : 0;
+    var value = spot > 0 ? g * spot : 0;
+    var unreal = spot > 0 ? value - cost : 0;
+    var unrealPct = cost > 0 ? unreal / cost : 0;
+
+    stats = {
+      grams: g, cost: cost, avgCost: avgCost, realized: realized,
+      spot: spot, value: value, unreal: unreal, unrealPct: unrealPct,
+      total: unreal + realized,
+      buyG: buyG, buyAmt: buyAmt, buyAvg: buyG > 0 ? buyAmt / buyG : 0,
+      sellG: sellG, sellAmt: sellAmt,
+      overSold: overSold, count: state.records.length
+    };
+    return stats;
+  }
+
+  /* ---------------- 渲染：金价 ---------------- */
+  function renderPrice() {
+    var s = state.spot;
+    var dot = $('#priceDot'), st = $('#priceState');
+    dot.className = 'dot';
+    if (state.busy) { dot.classList.add('busy'); st.textContent = '获取中…'; }
+    else if (state.err) { dot.classList.add('err'); st.textContent = '获取失败 · ' + state.err; }
+    else if (s) { st.textContent = state.settings.source === 'manual' ? '手动金价' : '实时'; }
+    else { st.textContent = '暂无价格'; }
+
+    $('#price').textContent = s && s.cny > 0 ? fmt(s.cny, 2) : '—';
+    $('#priceSrc').textContent = (s && s.src) || '—';
+    $('#priceTime').textContent = s ? timeAgo(s.ts) : '—';
+
+    var ref = [];
+    if (s && s.usdPerOz > 0) ref.push('$' + fmt(s.usdPerOz, 1) + '/oz');
+    if (s && s.usdCny > 0) ref.push('汇率 ' + fmt(s.usdCny, 3));
+    $('#priceRef').innerHTML = ref.length ? '<span class="k">' + ref.join(' · ') + '</span>' : '';
+
+    $('#btnSync').classList.toggle('on', !!(state.sync.token && state.sync.gistId));
+  }
+
+  /* ---------------- 渲染：统计 ---------------- */
+  function renderStats() {
+    var s = stats;
+    var hasSpot = s.spot > 0;
+
+    $('#sAvg').textContent = s.grams > 0 ? money(s.avgCost) : '—';
+    var diff = hasSpot && s.avgCost > 0 ? (s.spot - s.avgCost) / s.avgCost : 0;
+    if (s.grams > 0 && hasSpot && s.avgCost > 0) {
+      var above = s.spot >= s.avgCost;
+      $('#sAvgSub').innerHTML =
+        '<span class="' + (above ? 'up' : 'dn') + '">现价 ' + (above ? '高' : '低') + '于均价 ' +
+        fmt(Math.abs(diff) * 100, 2) + '%</span>';
+      $('#avgHint').textContent = above ? '浮盈' : '浮亏';
+      $('#avgHint').className = 'badge' + (above ? '' : ' warn');
+    } else {
+      $('#sAvgSub').textContent = s.grams > 0 ? '等待金价' : '还没有持仓';
+      $('#avgHint').textContent = '';
+      $('#avgHint').className = 'badge';
+    }
+
+    $('#sGrams').textContent = gfmt(s.grams) + ' g';
+    $('#sGramsSub').textContent = s.buyG > 0 ? '累计买入 ' + gfmt(s.buyG) + ' g' : '—';
+
+    $('#sCost').textContent = money(s.cost);
+    $('#sCostSub').textContent = '累计投入 ' + money(s.buyAmt);
+
+    $('#sValue').textContent = hasSpot ? money(s.value) : '—';
+    $('#sValueSub').textContent = hasSpot ? '@ ' + money(s.spot) + '/g' : '需要金价';
+
+    var u = $('#sUnreal');
+    u.textContent = hasSpot && s.grams > 0 ? signed(s.unreal) : '—';
+    u.className = 'v ' + (s.unreal > 0.005 ? 'up' : s.unreal < -0.005 ? 'dn' : 'flat');
+    $('#sUnrealSub').innerHTML = hasSpot && s.grams > 0
+      ? '<span class="' + (s.unreal > 0.005 ? 'up' : s.unreal < -0.005 ? 'dn' : 'flat') + '">' + pct(s.unrealPct) + '</span>'
+      : (s.grams > 0 ? '需要金价' : '—');
+
+    var r = $('#sReal');
+    r.textContent = s.sellG > 0 ? signed(s.realized) : '—';
+    r.className = 'v ' + (s.realized > 0.005 ? 'up' : s.realized < -0.005 ? 'dn' : 'flat');
+    $('#sRealSub').textContent = s.sellG > 0 ? '累计卖出 ' + gfmt(s.sellG) + ' g' : '还没有卖出';
+
+    if (s.overSold) {
+      $('#sRealSub').innerHTML += ' <span class="badge warn">卖出多于持有</span>';
+    }
+  }
+
+  /* ---------------- 渲染：走势图 ---------------- */
+  function downsample(arr, max) {
+    if (arr.length <= max) return arr;
+    var out = [], step = arr.length / max;
+    for (var i = 0; i < max; i++) out.push(arr[Math.floor(i * step)]);
+    out.push(arr[arr.length - 1]);
+    return out;
+  }
+
+  function renderChart() {
+    var el = $('#chart');
+    var pts = state.hist.filter(function (p) { return p && p.c > 0 && p.t > 0; });
+    var avg = stats && stats.grams > 0 ? stats.avgCost : 0;
+
+    if (pts.length < 2) {
+      el.innerHTML = '<div class="empty">多刷新几次，这里会画出金价曲线' +
+        (avg > 0 ? '<br>并叠加你的持仓均价线' : '') + '</div>';
+      $('#chartHint').textContent = '本地采样 · ' + pts.length + ' 个点';
+      return;
+    }
+    $('#chartHint').textContent = '本地采样 · ' + pts.length + ' 个点';
+
+    pts = downsample(pts, 380);
+    var W = 680, H = 210, PL = 8, PR = 8, PT = 16, PB = 22;
+    var iw = W - PL - PR, ih = H - PT - PB;
+
+    var vals = pts.map(function (p) { return p.c; });
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    if (avg > 0) { lo = Math.min(lo, avg); hi = Math.max(hi, avg); }
+    var span = hi - lo;
+    if (span < 0.5) span = Math.max(hi * 0.01, 1);
+    lo -= span * 0.14; hi += span * 0.14;
+
+    function x(i) { return PL + iw * i / (pts.length - 1); }
+    function y(v) { return PT + ih - ih * (v - lo) / (hi - lo); }
+
+    var d = '', dArea = '';
+    for (var i = 0; i < pts.length; i++) {
+      var px = x(i).toFixed(1), py = y(pts[i].c).toFixed(1);
+      d += (i === 0 ? 'M' : 'L') + px + ',' + py;
+    }
+    dArea = d + ' L' + x(pts.length - 1).toFixed(1) + ',' + (PT + ih) +
+            ' L' + PL + ',' + (PT + ih) + ' Z';
+
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:auto;display:block">';
+    svg += '<defs><linearGradient id="gFill" x1="0" y1="0" x2="0" y2="1">' +
+           '<stop offset="0%" stop-color="#e8b84b" stop-opacity=".28"/>' +
+           '<stop offset="100%" stop-color="#e8b84b" stop-opacity="0"/></linearGradient></defs>';
+    // 网格
+    for (var k = 0; k < 4; k++) {
+      var gy = PT + ih * k / 3;
+      svg += '<line x1="' + PL + '" y1="' + gy.toFixed(1) + '" x2="' + (W - PR) + '" y2="' + gy.toFixed(1) +
+             '" stroke="#262d39" stroke-width="1" stroke-dasharray="' + (k === 3 ? '0' : '3 4') + '"/>';
+    }
+    svg += '<path d="' + dArea + '" fill="url(#gFill)"/>';
+    svg += '<path d="' + d + '" fill="none" stroke="#e8b84b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+    if (avg > 0) {
+      var ay = y(avg).toFixed(1);
+      svg += '<line x1="' + PL + '" y1="' + ay + '" x2="' + (W - PR) + '" y2="' + ay +
+             '" stroke="#f3d68f" stroke-width="1.2" stroke-dasharray="5 5" opacity=".85" vector-effect="non-scaling-stroke"/>';
+    }
+    // 最后一点
+    var lx = x(pts.length - 1), ly = y(pts[pts.length - 1].c);
+    svg += '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="3.5" fill="#e8b84b" stroke="#0b0d11" stroke-width="1.5"/>';
+    svg += '</svg>';
+
+    // 文字标签用 HTML 覆盖，避免 SVG 缩放变形
+    var hiTxt = hi.toFixed(1), loTxt = lo.toFixed(1);
+    el.innerHTML = svg +
+      '<div style="display:flex;justify-content:space-between;font-size:11px;color:#626c7e;padding:2px 8px 6px">' +
+      '<span>' + new Date(pts[0].t).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) + '</span>' +
+      '<span>高 ' + hiTxt + ' · 低 ' + loTxt + '</span>' +
+      '<span>' + new Date(pts[pts.length - 1].t).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) + '</span>' +
+      '</div>';
+    if (avg > 0) {
+      el.innerHTML += '<div style="font-size:11px;color:#f3d68f;padding:0 8px 6px">' +
+        '<span style="display:inline-block;width:14px;border-top:1.5px dashed #f3d68f;vertical-align:middle;margin-right:5px"></span>' +
+        '持仓均价 ' + fmt(avg, 2) + '</div>';
+    }
+  }
+
+  /* ---------------- 渲染：记录 ---------------- */
+  function renderRecords() {
+    var list = $('#recList'), empty = $('#recEmpty');
+    var rs = state.records.slice().sort(function (a, b) {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+    $('#recCount').textContent = rs.length + ' 笔';
+    if (!rs.length) { empty.hidden = false; list.innerHTML = ''; return; }
+    empty.hidden = true;
+
+    var h = '';
+    rs.forEach(function (r) {
+      var g = num(r.grams), p = num(r.price), fee = num(r.fee);
+      var amt = g * p + (r.side === 'buy' ? fee : -fee);
+      h += '<div class="rec ' + r.side + '" data-id="' + r.id + '">' +
+        '<div class="tag">' + (r.side === 'buy' ? '买入' : '卖出') + '</div>' +
+        '<div class="main">' +
+          '<div class="l1"><span>' + gfmt(g) + ' g × ' + fmt(p, 2) + '</span>' +
+          '<span class="amt">' + (r.side === 'buy' ? '-' : '+') + money(amt) + '</span></div>' +
+          '<div class="l2"><span>' + r.date + '</span>' +
+          (fee > 0 ? '<span>手续费 ' + fmt(fee, 2) + '</span>' : '') +
+          (r.note ? '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.note) + '</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="ops">' +
+          '<button data-act="edit" title="编辑">✎</button>' +
+          '<button data-act="del" title="删除">🗑</button>' +
+        '</div>' +
+      '</div>';
+    });
+    list.innerHTML = h;
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function renderAll() {
+    computeStats();
+    renderPrice();
+    renderStats();
+    renderChart();
+    renderRecords();
+  }
+
+  /* ---------------- 持久化 ---------------- */
+  function saveData(touch) {
+    writeLS(K.rec, state.records);
+    writeLS(K.set, state.settings);
+    writeLS(K.hist, state.hist);
+    if (touch !== false) {
+      state.meta.updatedAt = Date.now();
+      writeLS(K.meta, state.meta);
+      scheduleSync();
+    }
+  }
+  function saveSync() { writeLS(K.sync, state.sync); }
+
+  /* ---------------- 金价 ---------------- */
+  function setSpot(obj) {
+    state.spot = Object.assign({ ts: Date.now() }, obj);
+    state.err = '';
+    writeLS(K.spot, state.spot);
+    pushHistory(state.spot.cny);
+  }
+
+  function pushHistory(c) {
+    if (!(c > 0)) return;
+    var h = state.hist, now = Date.now(), last = h[h.length - 1];
+    if (last && now - last.t < SAMPLE_GAP) { last.c = c; }
+    else { h.push({ t: now, c: c }); }
+    if (h.length > 4000) h.splice(0, h.length - 4000);
+    writeLS(K.hist, h);
+  }
+
+  function fetchAuto() {
+    var prem = num(state.settings.premium);
+    var manualFx = num(state.settings.usdCny);
+    return Promise.all([
+      fetchJSON('https://api.gold-api.com/price/XAU'),
+      manualFx > 0 ? Promise.resolve(null)
+        : fetchJSON('https://open.er-api.com/v6/latest/USD').catch(function () { return null; })
+    ]).then(function (res) {
+      var g = res[0], fx = res[1];
+      var usdPerOz = num(g && g.price);
+      if (!(usdPerOz > 0)) throw new Error('返回数据异常');
+      var rate = manualFx > 0 ? manualFx : num(fx && fx.rates && fx.rates.CNY);
+      if (!(rate > 0)) rate = 7.1;
+      var cny = usdPerOz / OZ * rate + prem;
+      return { cny: cny, usdPerOz: usdPerOz, usdCny: rate, src: '国际金价折算' };
+    }, function () {
+      throw new Error('网络不通（可改用代理或手动）');
+    });
+  }
+
+  function fetchProxy() {
+    var url = (state.settings.proxy || '').trim();
+    if (!url) return Promise.reject(new Error('未填代理地址'));
+    return fetchJSON(url).then(function (d) {
+      var cny = num(d && (d.cny != null ? d.cny : (d.price != null ? d.price : d.priceCnyPerGram)));
+      if (!(cny > 0)) throw new Error('返回格式不对');
+      return {
+        cny: cny,
+        usdPerOz: num(d.usdPerOz),
+        usdCny: num(d.usdCny),
+        src: d.source ? ('代理 · ' + d.source) : '自定义代理'
+      };
+    });
+  }
+
+  function refreshPrice(silent) {
+    var s = state.settings;
+    if (s.source === 'manual') {
+      var p = num(s.manual);
+      if (p > 0) { setSpot({ cny: p, usdPerOz: 0, usdCny: 0, src: '手动填写' }); renderAll(); return Promise.resolve(); }
+      state.err = '请先在设置里填写金价';
+      renderPrice();
+      return Promise.resolve();
+    }
+    if (state.busy) return Promise.resolve();
+    state.busy = true; state.err = '';
+    renderPrice();
+
+    var task = s.source === 'proxy' ? fetchProxy() : fetchAuto();
+    return task.then(function (r) {
+      state.busy = false;
+      setSpot({ cny: r.cny, usdPerOz: r.usdPerOz || 0, usdCny: r.usdCny || 0, src: r.src });
+      renderAll();
+    }).catch(function (e) {
+      state.busy = false;
+      state.err = e && e.name === 'AbortError' ? '超时' : (e && e.message ? e.message : '失败');
+      renderPrice();
+      if (!silent) toast('金价获取失败：' + state.err);
+    });
+  }
+
+  /* ---------------- 记录 CRUD ---------------- */
+  var editingId = null, lastField = '';
+
+  function openRec(rec) {
+    editingId = rec ? rec.id : null;
+    $('#recTitle').textContent = rec ? '编辑记录' : '添加记录';
+    $('#rId').value = rec ? rec.id : '';
+    $('#rDate').value = rec ? rec.date : todayStr();
+    $('#rGrams').value = rec ? num(rec.grams) : '';
+    $('#rPrice').value = rec ? num(rec.price)
+      : (stats && stats.spot > 0 ? (Math.round(stats.spot * 100) / 100) : '');
+    $('#rAmount').value = rec ? fmt(num(rec.grams) * num(rec.price), 2).replace(/,/g, '') : '';
+    $('#rFee').value = rec && num(rec.fee) ? num(rec.fee) : '';
+    $('#rNote').value = rec && rec.note ? rec.note : '';
+    lastField = '';
+    setSide(rec ? rec.side : 'buy');
+    openModal('modalRec');
+    if (!rec) setTimeout(function () { $('#rGrams').focus(); }, 220);
+  }
+
+  function setSide(side) {
+    $$('#modalRec .seg-btn').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.side === side);
+    });
+    $('#modalRec').dataset.side = side;
+  }
+  function getSide() { return $('#modalRec').dataset.side || 'buy'; }
+
+  function syncFields(from) {
+    var g = num($('#rGrams').value), p = num($('#rPrice').value), a = num($('#rAmount').value);
+    if (from === 'grams') {
+      if (p > 0) $('#rAmount').value = trimNum(g * p);
+      else if (a > 0 && g > 0) $('#rPrice').value = trimNum(a / g);
+    } else if (from === 'price') {
+      if (g > 0) $('#rAmount').value = trimNum(g * p);
+      else if (a > 0 && p > 0) $('#rGrams').value = trimNum(a / p);
+    } else if (from === 'amount') {
+      if (g > 0) $('#rPrice').value = trimNum(a / g);
+      else if (p > 0) $('#rGrams').value = trimNum(a / p);
+    }
+  }
+  function trimNum(n) {
+    if (!isFinite(n)) return '';
+    return String(Math.round(n * 10000) / 10000);
+  }
+
+  function submitRec(e) {
+    e.preventDefault();
+    var g = num($('#rGrams').value), p = num($('#rPrice').value), a = num($('#rAmount').value);
+    if (!(g > 0) && a > 0 && p > 0) { g = a / p; }
+    if (!(p > 0) && a > 0 && g > 0) { p = a / g; }
+    if (!(g > 0)) { toast('请填写克重'); return; }
+    if (!(p > 0)) { toast('请填写单价或总金额'); return; }
+
+    var rec = {
+      id: editingId || uid(),
+      date: $('#rDate').value || todayStr(),
+      side: getSide(),
+      grams: Math.round(g * 1000) / 1000,
+      price: Math.round(p * 10000) / 10000,
+      fee: Math.round(num($('#rFee').value) * 100) / 100,
+      note: $('#rNote').value.trim(),
+      createdAt: Date.now()
+    };
+
+    if (editingId) {
+      var i = state.records.findIndex(function (r) { return r.id === editingId; });
+      if (i >= 0) { rec.createdAt = state.records[i].createdAt || Date.now(); state.records[i] = rec; }
+    } else {
+      state.records.push(rec);
+    }
+    saveData();
+    renderAll();
+    closeModal('modalRec');
+    toast(editingId ? '已更新' : '已记录 ' + gfmt(rec.grams) + ' g');
+    editingId = null;
+  }
+
+  /* ---------------- 弹窗 ---------------- */
+  function openModal(id) { $('#' + id).hidden = false; document.body.style.overflow = 'hidden'; }
+  function closeModal(id) { $('#' + id).hidden = true; document.body.style.overflow = ''; }
+
+  /* ---------------- 设置 ---------------- */
+  function openSettings() {
+    var s = state.settings;
+    $('#sSource').value = s.source;
+    $('#sManual').value = s.manual ? trimNum(s.manual) : '';
+    $('#sProxy').value = s.proxy || '';
+    $('#sPremium').value = s.premium ? trimNum(s.premium) : '';
+    $('#sUsdCny').value = s.usdCny ? trimNum(s.usdCny) : '';
+    $('#sToken').value = state.sync.token || '';
+    $('#sGist').value = state.sync.gistId || '';
+    $('#sAutoSync').checked = !!state.sync.auto;
+    toggleSourceBoxes();
+    openModal('modalSet');
+  }
+  function toggleSourceBoxes() {
+    var v = $('#sSource').value;
+    $('#boxManual').hidden = v !== 'manual';
+    $('#boxProxy').hidden = v !== 'proxy';
+    $('#boxAuto').hidden = v !== 'auto';
+    $('#srcHint').textContent =
+      v === 'auto' ? '直连公开接口，无需任何配置，适合网络通畅的环境。' :
+      v === 'proxy' ? '自己部署的代理，可拿到国内金价，速度更稳。' :
+      '完全离线，金价自己填。';
+  }
+  function saveSettings() {
+    state.settings = {
+      source: $('#sSource').value,
+      manual: num($('#sManual').value),
+      proxy: $('#sProxy').value.trim(),
+      premium: num($('#sPremium').value),
+      usdCny: num($('#sUsdCny').value)
+    };
+    state.sync.token = $('#sToken').value.trim();
+    state.sync.gistId = $('#sGist').value.trim();
+    state.sync.auto = $('#sAutoSync').checked;
+    saveSync(); saveData(false);
+    closeModal('modalSet');
+    toast('设置已保存');
+    refreshPrice(true);
+  }
+
+  /* ---------------- 云同步（GitHub Gist） ---------------- */
+  var syncTimer = null, syncing = false;
+  function scheduleSync() {
+    if (!state.sync.token || !state.sync.gistId || !state.sync.auto) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () { doSync(true); }, 2500);
+  }
+
+  function gh(path, opts) {
+    opts = opts || {};
+    var headers = {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': 'Bearer ' + state.sync.token,
+      'X-GitHub-Api-Version': '2022-11-28'
+    };
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    return fetch('https://api.github.com' + path, {
+      method: opts.method || 'GET',
+      headers: headers,
+      body: opts.body
+    }).then(function (r) {
+      if (r.status === 204 || r.status === 304) return null;
+      return r.json().then(function (d) {
+        if (!r.ok) throw new Error((d && d.message) || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+
+  function docPayload() {
+    return {
+      app: 'gold-ledger',
+      version: 1,
+      updatedAt: state.meta.updatedAt || Date.now(),
+      records: state.records,
+      settings: state.settings,
+      hist: state.hist.slice(-2000)
+    };
+  }
+
+  function applyRemote(doc) {
+    if (!doc || !Array.isArray(doc.records)) throw new Error('云端数据格式不对');
+    state.records = doc.records;
+    state.hist = Array.isArray(doc.hist) ? doc.hist : [];
+    state.meta.updatedAt = doc.updatedAt || Date.now();
+    if (doc.settings) {
+      state.settings = Object.assign({}, DEFAULT_SET, doc.settings);
+      writeLS(K.set, state.settings);
+    }
+    writeLS(K.rec, state.records);
+    writeLS(K.hist, state.hist);
+    writeLS(K.meta, state.meta);
+    renderAll();
+  }
+
+  function readGistFile(g) {
+    var f = g && g.files && g.files[GIST_FILE];
+    if (!f) return Promise.reject(new Error('云端还没有数据文件'));
+    if (f.truncated && f.raw_url) {
+      return fetch(f.raw_url).then(function (r) { return r.text(); }).then(JSON.parse);
+    }
+    return Promise.resolve(JSON.parse(f.content));
+  }
+
+  function doSync(auto) {
+    if (syncing) return Promise.resolve();
+    if (!state.sync.token) { if (!auto) toast('请先填 GitHub Token'); return Promise.resolve(); }
+    if (!state.sync.gistId) { if (!auto) toast('还没有云存档，点「新建云存档」'); return Promise.resolve(); }
+
+    syncing = true;
+    $('#btnSync').classList.add('on');
+    return gh('/gists/' + state.sync.gistId)
+      .then(readGistFile)
+      .then(function (remote) {
+        var rAt = remote.updatedAt || 0;
+        var lAt = state.meta.updatedAt || 0;
+        if (lAt > rAt + 1000) {
+          return pushGist().then(function () { return 'pushed'; });
+        }
+        if (rAt > lAt + 1000) {
+          applyRemote(remote);
+          return 'pulled';
+        }
+        return 'same';
+      })
+      .then(function (what) {
+        syncing = false;
+        if (!auto) {
+          toast(what === 'pulled' ? '已拉取云端数据' :
+                what === 'pushed' ? '已上传本机数据' : '已是最新');
+        }
+      })
+      .catch(function (e) {
+        syncing = false;
+        toast('同步失败：' + e.message);
+      });
+  }
+
+  function pushGist() {
+    var body = JSON.stringify({
+      files: (function () {
+        var o = {};
+        o[GIST_FILE] = { content: JSON.stringify(docPayload(), null, 2) };
+        return o;
+      })()
+    });
+    return gh('/gists/' + state.sync.gistId, { method: 'PATCH', body: body });
+  }
+
+  function createGist() {
+    if (!state.sync.token) { toast('请先填 GitHub Token'); return; }
+    $('#btnGistCreate').textContent = '创建中…';
+    var body = JSON.stringify({
+      description: '黄金账本 gold-ledger 数据（建议设为 secret gist）',
+      public: false,
+      files: (function () {
+        var o = {};
+        o[GIST_FILE] = { content: JSON.stringify(docPayload(), null, 2) };
+        return o;
+      })()
+    });
+    gh('/gists', { method: 'POST', body: body })
+      .then(function (r) {
+        state.sync.gistId = r.id;
+        saveSync();
+        $('#sGist').value = r.id;
+        toast('云存档已创建');
+      })
+      .catch(function (e) { toast('创建失败：' + e.message); })
+      .then(function () { $('#btnGistCreate').textContent = '新建云存档'; });
+  }
+
+  /* ---------------- 导入导出 ---------------- */
+  function download(name, text, type) {
+    var blob = new Blob([text], { type: type || 'application/json;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 400);
+  }
+  function stamp() {
+    var d = new Date(), p = function (x) { return x < 10 ? '0' + x : '' + x; };
+    return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes());
+  }
+  function exportJSON() {
+    download('黄金账本-' + stamp() + '.json', JSON.stringify(docPayload(), null, 2));
+    toast('已导出备份');
+  }
+  function exportCSV() {
+    var rows = [['日期', '方向', '克重(g)', '单价(元/g)', '金额(元)', '手续费(元)', '备注']];
+    state.records.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; }).forEach(function (r) {
+      var g = num(r.grams), p = num(r.price), f = num(r.fee);
+      rows.push([r.date, r.side === 'buy' ? '买入' : '卖出', g, p, (g * p).toFixed(2), f.toFixed(2), r.note || '']);
+    });
+    var csv = '\uFEFF' + rows.map(function (row) {
+      return row.map(function (c) {
+        c = String(c);
+        return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+      }).join(',');
+    }).join('\r\n');
+    download('黄金账本-' + stamp() + '.csv', csv, 'text/csv;charset=utf-8');
+    toast('已导出 CSV');
+  }
+  function importJSON(file) {
+    var fr = new FileReader();
+    fr.onload = function () {
+      var doc;
+      try { doc = JSON.parse(String(fr.result)); }
+      catch (e) { toast('文件解析失败'); return; }
+      if (!doc || !Array.isArray(doc.records)) { toast('不是有效的备份文件'); return; }
+      if (!confirm('导入将覆盖当前 ' + state.records.length + ' 条记录，确定？')) return;
+      applyRemote(doc);
+      state.meta.updatedAt = Date.now();
+      writeLS(K.meta, state.meta);
+      saveData();
+      toast('已导入 ' + doc.records.length + ' 条记录');
+    };
+    fr.readAsText(file);
+  }
+
+  /* ---------------- 事件绑定 ---------------- */
+  function bind() {
+    $('#fab').addEventListener('click', function () { openRec(null); });
+    $$('[data-close]').forEach(function (b) {
+      b.addEventListener('click', function () { closeModal(b.dataset.close); });
+    });
+    $$('.modal').forEach(function (m) {
+      m.addEventListener('click', function (e) { if (e.target === m) closeModal(m.id); });
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') $$('.modal').forEach(function (m) { if (!m.hidden) closeModal(m.id); });
+    });
+
+    $('#formRec').addEventListener('submit', submitRec);
+    $$('#modalRec .seg-btn').forEach(function (b) {
+      b.addEventListener('click', function () { setSide(b.dataset.side); });
+    });
+    $('#rGrams').addEventListener('input', function () { lastField = 'grams'; syncFields('grams'); });
+    $('#rPrice').addEventListener('input', function () { lastField = 'price'; syncFields('price'); });
+    $('#rAmount').addEventListener('input', function () { lastField = 'amount'; syncFields('amount'); });
+
+    $('#recList').addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      var row = btn.closest('.rec');
+      var id = row && row.dataset.id;
+      var rec = state.records.find(function (r) { return r.id === id; });
+      if (!rec) return;
+      if (btn.dataset.act === 'edit') { openRec(rec); return; }
+      if (btn.dataset.act === 'del') {
+        if (!confirm('删除 ' + rec.date + ' 的 ' + (rec.side === 'buy' ? '买入' : '卖出') + '记录？')) return;
+        state.records = state.records.filter(function (r) { return r.id !== id; });
+        saveData(); renderAll(); toast('已删除');
+      }
+    });
+
+    $('#btnRefresh').addEventListener('click', function () { refreshPrice(false); });
+    $('#btnSettings').addEventListener('click', openSettings);
+    $('#btnSync').addEventListener('click', function () {
+      if (!state.sync.token || !state.sync.gistId) { openSettings(); toast('先配置云同步'); return; }
+      doSync(false);
+    });
+    $('#sSource').addEventListener('change', toggleSourceBoxes);
+    $('#btnSaveSet').addEventListener('click', saveSettings);
+    $('#btnGistCreate').addEventListener('click', createGist);
+    $('#btnGistSync').addEventListener('click', function () {
+      state.sync.token = $('#sToken').value.trim();
+      state.sync.gistId = $('#sGist').value.trim();
+      saveSync();
+      doSync(false);
+    });
+    $('#btnExport').addEventListener('click', exportJSON);
+    $('#btnCsv').addEventListener('click', exportCSV);
+    $('#btnImport').addEventListener('click', function () { $('#fileImport').click(); });
+    $('#fileImport').addEventListener('change', function (e) {
+      var f = e.target.files && e.target.files[0];
+      if (f) importJSON(f);
+      e.target.value = '';
+    });
+    $('#btnClear').addEventListener('click', function () {
+      if (!confirm('确定清空全部 ' + state.records.length + ' 条记录？建议先导出备份。')) return;
+      if (!confirm('再确认一次：清空后无法恢复。')) return;
+      state.records = [];
+      state.hist = [];
+      saveData(); renderAll(); toast('已清空');
+    });
+
+    // 回到前台时刷新
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden && state.spot && Date.now() - state.spot.ts > 5 * 60000) refreshPrice(true);
+    });
+  }
+
+  /* ---------------- 启动 ---------------- */
+  function boot() {
+    bind();
+    renderAll();
+    refreshPrice(true);
+    if (state.sync.token && state.sync.gistId) doSync(true);
+    setInterval(function () { if (!document.hidden) refreshPrice(true); }, 5 * 60 * 1000);
+
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    }
+  }
+
+  /* 调试钩子：浏览器控制台里 __GL__ 可以查看/重算数据 */
+  try {
+    window.__GL__ = {
+      state: state,
+      compute: computeStats,
+      stats: function () { return computeStats(); },
+      render: renderAll,
+      applyRemote: applyRemote,
+      docPayload: docPayload
+    };
+  } catch (e) {}
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+</script>
+</body>
+</html>
