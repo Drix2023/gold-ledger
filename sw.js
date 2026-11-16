@@ -1,7 +1,7 @@
 ﻿/* 黄金账本 — Service Worker
    策略：页面走「网络优先」，断网时回退缓存；其他静态资源走缓存优先。
    升级时改 VERSION 即可让旧缓存失效。 */
-const VERSION = 'gl-v2';
+const VERSION = 'gl-v3';
 const SHELL = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', (e) => {

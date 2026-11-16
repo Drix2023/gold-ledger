@@ -130,6 +130,15 @@ input,select,textarea{font:inherit;color:inherit}
 .legend i{width:18px;height:3px;border-radius:2px;display:inline-block;flex:0 0 auto}
 .legend b{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
 .axis{display:flex;justify-content:space-between;font-size:11px;color:var(--ink3);padding:6px 10px 2px}
+.chart-note{font-size:10.5px;color:var(--ink3);padding:2px 12px 8px;line-height:1.5}
+.chart-tools{display:flex;align-items:center;gap:10px;padding:8px 12px 10px;border-top:1px solid var(--line);margin-top:6px}
+.rt-cap{font-size:11.5px;color:var(--ink3);flex:0 0 auto}
+.rt-val{font-size:11.5px;color:var(--ink2);font-weight:600;min-width:54px;text-align:right;flex:0 0 auto}
+#rangeSlider{-webkit-appearance:none;appearance:none;flex:1;height:20px;background:transparent;cursor:pointer;margin:0}
+#rangeSlider::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:var(--line)}
+#rangeSlider::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--accent);margin-top:-6.5px;border:2px solid #fff;box-shadow:0 2px 6px rgba(120,80,50,.45)}
+#rangeSlider::-moz-range-track{height:5px;border-radius:3px;background:var(--line)}
+#rangeSlider::-moz-range-thumb{width:16px;height:16px;border:2px solid #fff;border-radius:50%;background:var(--accent);box-shadow:0 2px 6px rgba(120,80,50,.45)}
 
 /* ---------- 记录 ---------- */
 .rec{display:flex;align-items:center;gap:12px;padding:13px 15px;border-bottom:1px solid var(--line)}
@@ -290,7 +299,14 @@ input,select,textarea{font:inherit;color:inherit}
 
   <!-- 走势 -->
   <div class="sec-title"><b>金价走势</b><span id="chartHint">本地采样</span></div>
-  <section class="card chart-card"><div id="chart"></div></section>
+  <section class="card chart-card">
+    <div id="chart"></div>
+    <div class="chart-tools">
+      <span class="rt-cap">区间</span>
+      <input type="range" id="rangeSlider" min="0" max="11" step="1" value="5" aria-label="显示区间">
+      <span class="rt-val" id="rangeLabel">3 个月</span>
+    </div>
+  </section>
 
   <!-- 记录 -->
   <div class="sec-title"><b>交易记录</b><span id="recCount">0 笔</span></div>
@@ -466,7 +482,8 @@ input,select,textarea{font:inherit;color:inherit}
     manual: 0,
     proxy: '',
     premium: 0,
-    usdCny: 0
+    usdCny: 0,
+    rangeIdx: 5
   };
 
   /* 银行名称别名：接口返回的名字五花八门（工行/工商银行、农行/农业银行） */
@@ -560,6 +577,8 @@ input,select,textarea{font:inherit;color:inherit}
     sync: Object.assign({ token: '', gistId: '', auto: true }, readLS(K.sync, {}) || {}),
     meta: Object.assign({ updatedAt: 0 }, readLS(K.meta, {}) || {}),
     spot: readLS(K.spot, null),
+    daily: [],
+    dailyErr: '',
     busy: false,
     err: ''
   };
@@ -697,6 +716,7 @@ input,select,textarea{font:inherit;color:inherit}
   }
 
   /* ---------------- 渲染：走势图 ---------------- */
+
   function downsample(arr, max) {
     if (arr.length <= max) return arr;
     var out = [], step = arr.length / max;
@@ -711,7 +731,81 @@ input,select,textarea{font:inherit;color:inherit}
     return isFinite(t) ? t : Date.now();
   }
 
-  /* 每笔交易之后的持仓均价，清仓处断开成多段 */
+  /* ---- 历史日线：东方财富 · 沪金主连（元/克），2026-01-01 起，支持跨域 ---- */
+  var DAILY_KEY = 'gl.daily.v1';
+  var EM_URL = 'https://push2his.eastmoney.com/api/qt/stock/kline/get'
+    + '?fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56'
+    + '&klt=101&fqt=0&beg=20260101&end=20500101&secid=113.aum';
+
+  function fetchDaily() {
+    var cached = readLS(DAILY_KEY, null);
+    var today = todayStr();
+    if (cached && cached.date === today && Array.isArray(cached.list) && cached.list.length > 1) {
+      return Promise.resolve(cached.list);
+    }
+    return fetchJSON(EM_URL, {}, 15000).then(function (d) {
+      var kl = d && d.data && d.data.klines;
+      if (!Array.isArray(kl) || !kl.length) throw new Error('历史行情为空');
+      var list = [];
+      kl.forEach(function (s) {
+        var f = String(s).split(',');
+        var c = num(f[2]);
+        if (f[0] && c > 0) list.push({ d: f[0], c: c });
+      });
+      if (list.length < 2) throw new Error('历史行情不足');
+      writeLS(DAILY_KEY, { date: today, list: list });
+      return list;
+    });
+  }
+
+  var dailyLoading = null;
+  function ensureDaily(force) {
+    if (!force && state.daily && state.daily.length) { renderChart(); return Promise.resolve(state.daily); }
+    if (dailyLoading) return dailyLoading;
+    dailyLoading = fetchDaily().then(function (list) {
+      state.daily = list;
+      state.dailyErr = '';
+      dailyLoading = null;
+      renderChart();
+      return list;
+    }).catch(function (e) {
+      dailyLoading = null;
+      state.dailyErr = (e && e.message) ? e.message : '失败';
+      renderChart();
+      return [];
+    });
+    return dailyLoading;
+  }
+
+  /* ---- 金价序列 = 日线 + 本地实时采样（超过去重） ---- */
+  function buildPriceSeries() {
+    var out = [];
+    (state.daily || []).forEach(function (p) {
+      if (p && p.d) out.push({ t: recTimestamp(p.d), c: num(p.c) });
+    });
+    var lastT = out.length ? out[out.length - 1].t : 0;
+    (state.hist || []).forEach(function (p) {
+      if (p && p.c > 0 && p.t > 0 && p.t > lastT + 3600e3) out.push({ t: p.t, c: p.c });
+    });
+    if (!out.length) {
+      (state.hist || []).forEach(function (p) {
+        if (p && p.c > 0 && p.t > 0) out.push({ t: p.t, c: p.c });
+      });
+    }
+    out.sort(function (a, b) { return a.t - b.t; });
+    /* 整条曲线平移，让最后一个点正好等于卡片上的价（中行积存金） */
+    if (out.length && state.spot && state.spot.cny > 0) {
+      var lastC = out[out.length - 1].c;
+      var shift = lastC > 0 ? state.spot.cny - lastC : 0;
+      if (isFinite(shift) && Math.abs(shift) < 500) {
+        for (var i = 0; i < out.length; i++) out[i].c += shift;
+        state.lastShift = shift;
+      } else { state.lastShift = 0; }
+    } else { state.lastShift = 0; }
+    return out;
+  }
+
+  /* ---- 每笔交易之后的持仓均价，清仓处断开成多段 ---- */
   function buildAvgSegments() {
     var rs = state.records.slice().sort(function (a, b) {
       if (a.date !== b.date) return a.date < b.date ? -1 : 1;
@@ -739,36 +833,98 @@ input,select,textarea{font:inherit;color:inherit}
     return segs;
   }
 
+  /* ---- 时间窗档位 ---- */
+  var RANGE_STOPS = [
+    { d: 5, label: '5 天' },
+    { d: 10, label: '10 天' },
+    { d: 15, label: '15 天' },
+    { d: 30, label: '1 个月' },
+    { d: 60, label: '2 个月' },
+    { d: 90, label: '3 个月' },
+    { d: 120, label: '4 个月' },
+    { d: 180, label: '6 个月' },
+    { d: 270, label: '9 个月' },
+    { d: 365, label: '1 年' },
+    { d: 730, label: '2 年' },
+    { d: 100000, label: '全部' }
+  ];
+  function rangePrefix() {
+    var i = state.settings.rangeIdx | 0;
+    if (i < 0 || i >= RANGE_STOPS.length) i = 5;
+    return RANGE_STOPS[i];
+  }
+  function syncRangeUI() {
+    var i = state.settings.rangeIdx | 0;
+    if (i < 0 || i >= RANGE_STOPS.length) i = 5;
+    var sl = $('#rangeSlider'), lb = $('#rangeLabel');
+    if (sl) sl.value = String(i);
+    if (lb) lb.textContent = RANGE_STOPS[i].label;
+  }
+
   function renderChart() {
     var el = $('#chart');
-    var price = downsample(state.hist.filter(function (p) { return p && p.c > 0 && p.t > 0; }), 380);
-    var segs = buildAvgSegments();
-    var avgPts = [];
-    segs.forEach(function (s) { s.forEach(function (p) { avgPts.push(p); }); });
+    if (!el) return;
 
-    $('#chartHint').textContent = '金价 ' + price.length + ' 点 · 均价 ' + avgPts.length + ' 笔';
+    var all = buildPriceSeries();
+    var segsAll = buildAvgSegments();
+    var avgAll = [];
+    segsAll.forEach(function (s) { s.forEach(function (p) { avgAll.push(p); }); });
 
-    if (price.length < 2 && avgPts.length < 2) {
-      el.innerHTML = '<div class="empty">多刷新几次，这里会画出金价曲线<br>' +
-        '记录买入后，还会叠加一条<b style="color:#6B4A32"> 持仓均价曲线</b></div>';
+    $('#chartHint').textContent = all.length ? ('沪金 · ' + all.length + ' 个点') : '';
+
+    if (!all.length && !avgAll.length) {
+      el.innerHTML = '<div class="empty">' + (state.dailyErr
+        ? '历史金价获取失败：' + esc(state.dailyErr) + '<br>点右上角「刷新」再试'
+        : '正在获取历史金价…') + '</div>';
       return;
     }
 
-    /* ---- 统一时间轴：金价采样 + 交易日期 ---- */
-    var ts = [];
-    price.forEach(function (p) { ts.push(p.t); });
-    avgPts.forEach(function (p) { ts.push(p.t); });
-    var t0 = Math.min.apply(null, ts), t1 = Math.max.apply(null, ts);
-    if (t1 - t0 < 3600e3) { t0 -= 1800e3; t1 += 1800e3; }
+    /* ---- 时间窗 ---- */
+    var tsAll = [];
+    all.forEach(function (p) { tsAll.push(p.t); });
+    avgAll.forEach(function (p) { tsAll.push(p.t); });
+    var tEnd = tsAll.length ? Math.max.apply(null, tsAll) : Date.now();
+    var tMin = tsAll.length ? Math.min.apply(null, tsAll) : tEnd;
+    var stop = rangePrefix();
+    var t0 = Math.max(tMin, tEnd - stop.d * 86400000);
+    var t1 = tEnd;
+    if (t1 - t0 < 86400000) t0 = t1 - 86400000;
 
+    var price = all.filter(function (p) { return p.t >= t0 && p.t <= t1; });
+    price = downsample(price, 400);
+
+    var openPos = stats && stats.grams > 0;
+    function clipSeg(seg, isOpen) {
+      if (!seg || !seg.length) return [];
+      var lastP = seg[seg.length - 1];
+      /* 这段已经清仓收尾，窗口内不再有持仓 */
+      if (lastP.t < t0) {
+        /* 但如果它是「当前仍持有」的最后一段，均价会一直延续到今天 */
+        return isOpen ? [{ t: t0, v: lastP.v }] : [];
+      }
+      var out = [], i, active = null;
+      for (i = 0; i < seg.length; i++) { if (seg[i].t <= t0) active = seg[i]; else break; }
+      if (active) out.push({ t: t0, v: active.v });
+      for (i = 0; i < seg.length; i++) if (seg[i].t > t0 && seg[i].t <= t1) out.push(seg[i]);
+      return out;
+    }
+    var segs = [];
+    segsAll.forEach(function (s, si) {
+      var c = clipSeg(s, si === segsAll.length - 1 && openPos);
+      if (c.length) segs.push(c);
+    });
+
+    /* ---- 值域 ---- */
     var vals = [];
     price.forEach(function (p) { vals.push(p.c); });
-    avgPts.forEach(function (p) { vals.push(p.v); });
+    segs.forEach(function (s) { s.forEach(function (p) { vals.push(p.v); }); });
+    if (!vals.length) { el.innerHTML = '<div class="empty">这个区间还没有数据</div>'; return; }
+
     var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
     var realLo = lo, realHi = hi;
     var span = hi - lo;
-    if (span < 0.5) span = Math.max(hi * 0.01, 1);
-    lo -= span * 0.13; hi += span * 0.13;
+    if (span < 0.5) span = Math.max(hi * 0.008, 1);
+    lo -= span * 0.12; hi += span * 0.12;
 
     var W = 680, H = 210, PL = 10, PR = 10, PT = 14, PB = 10;
     var iw = W - PL - PR, ih = H - PT - PB;
@@ -778,12 +934,12 @@ input,select,textarea{font:inherit;color:inherit}
     var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
     svg += '<defs>' +
       '<linearGradient id="gFill" x1="0" y1="0" x2="0" y2="1">' +
-        '<stop offset="0%" stop-color="#C2703D" stop-opacity=".22"/>' +
+        '<stop offset="0%" stop-color="#C2703D" stop-opacity=".20"/>' +
         '<stop offset="100%" stop-color="#E0A15E" stop-opacity="0"/>' +
       '</linearGradient>' +
       '<linearGradient id="gLine" x1="0" y1="0" x2="1" y2="0">' +
         '<stop offset="0%" stop-color="#C2703D"/>' +
-        '<stop offset="100%" stop-color="#E0A15E"/>' +
+        '<stop offset="100%" stop-color="#D98B2B"/>' +
       '</linearGradient>' +
     '</defs>';
 
@@ -793,18 +949,20 @@ input,select,textarea{font:inherit;color:inherit}
              '" stroke="#F4EAE0" stroke-width="1"' + (k === 3 ? '' : ' stroke-dasharray="3 5"') + '/>';
     }
 
-    /* ---- 金价曲线 ---- */
+    /* ---- 金价（陶土橙） ---- */
     if (price.length >= 2) {
       var d = '';
       price.forEach(function (p, i) { d += (i ? 'L' : 'M') + X(p.t).toFixed(1) + ',' + Y(p.c).toFixed(1); });
       var xa = X(price[0].t).toFixed(1), xb = X(price[price.length - 1].t).toFixed(1);
       svg += '<path d="' + d + 'L' + xb + ',' + (PT + ih) + 'L' + xa + ',' + (PT + ih) + 'Z" fill="url(#gFill)"/>';
-      svg += '<path d="' + d + '" fill="none" stroke="url(#gLine)" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+      svg += '<path d="' + d + '" fill="none" stroke="url(#gLine)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+    }
+    if (price.length >= 1) {
       var lp = price[price.length - 1];
       svg += '<circle cx="' + X(lp.t).toFixed(1) + '" cy="' + Y(lp.c).toFixed(1) + '" r="4.5" fill="#C2703D" stroke="#fff" stroke-width="2"/>';
     }
 
-    /* ---- 持仓均价阶梯曲线（每笔交易后一个台阶） ---- */
+    /* ---- 持仓均价（墨青，实线 + 台阶 + 落点） ---- */
     segs.forEach(function (seg, si) {
       var path = '';
       seg.forEach(function (p, i) {
@@ -812,27 +970,35 @@ input,select,textarea{font:inherit;color:inherit}
         if (i === 0) path += 'M' + px + ',' + py;
         else path += 'L' + px + ',' + Y(seg[i - 1].v).toFixed(1) + 'L' + px + ',' + py;
       });
-      if (si === segs.length - 1) path += 'L' + (W - PR) + ',' + Y(seg[seg.length - 1].v).toFixed(1);
-      // 白色描边打底，保证压在粉色曲线上也看得清
-      svg += '<path d="' + path + '" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" opacity=".9" vector-effect="non-scaling-stroke"/>';
-      svg += '<path d="' + path + '" fill="none" stroke="#6B4A32" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+      if (si === segs.length - 1 && openPos) path += 'L' + (W - PR) + ',' + Y(seg[seg.length - 1].v).toFixed(1);
+      svg += '<path d="' + path + '" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" opacity=".92" vector-effect="non-scaling-stroke"/>';
+      svg += '<path d="' + path + '" fill="none" stroke="#1F6F6B" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
       seg.forEach(function (p) {
-        svg += '<circle cx="' + X(p.t).toFixed(1) + '" cy="' + Y(p.v).toFixed(1) + '" r="3.4" fill="#6B4A32" stroke="#fff" stroke-width="1.8"/>';
+        svg += '<circle cx="' + X(p.t).toFixed(1) + '" cy="' + Y(p.v).toFixed(1) + '" r="3.6" fill="#1F6F6B" stroke="#fff" stroke-width="1.8"/>';
       });
     });
     svg += '</svg>';
 
-    var fd = function (t) { return new Date(t).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }); };
+    var fd = function (t) {
+      var dd = new Date(t);
+      return (dd.getMonth() + 1) + '/' + dd.getDate();
+    };
     var out = svg + '<div class="axis"><span>' + fd(t0) + '</span><span>高 ' + realHi.toFixed(1) + ' · 低 ' + realLo.toFixed(1) + '</span><span>' + fd(t1) + '</span></div>';
 
     var lg = '<div class="legend">';
-    if (price.length >= 2) {
-      lg += '<span><i style="background:linear-gradient(90deg,#C2703D,#E0A15E)"></i>金价 <b>' + fmt(price[price.length - 1].c, 2) + '</b></span>';
+    if (price.length) {
+      lg += '<span><i style="background:linear-gradient(90deg,#C2703D,#D98B2B)"></i>金价 <b>' + fmt(price[price.length - 1].c, 2) + '</b></span>';
     }
-    if (avgPts.length) {
-      lg += '<span><i style="background:repeating-linear-gradient(90deg,#6B4A32 0 5px,transparent 5px 10px)"></i>持仓均价 <b>' + fmt(avgPts[avgPts.length - 1].v, 2) + '</b></span>';
+    if (segs.length) {
+      var lastSeg = segs[segs.length - 1];
+      lg += '<span><i style="background:#1F6F6B"></i>持仓均价 <b>' + fmt(lastSeg[lastSeg.length - 1].v, 2) + '</b></span>';
     }
-    el.innerHTML = out + lg + '</div>';
+    lg += '</div>';
+    el.innerHTML = out + lg;
+    if (Math.abs(num(state.lastShift)) >= 0.5) {
+      el.innerHTML += '<div class="chart-note">金价曲线已整体平移到你的报价水平（沪金主连 ' +
+        (state.lastShift > 0 ? '+' : '') + fmt(state.lastShift, 2) + ' 元/克），这样两条线才能直接比盈亏</div>';
+    }
   }
 
   /* ---------------- 渲染：记录 ---------------- */
@@ -1372,8 +1538,16 @@ input,select,textarea{font:inherit;color:inherit}
       }
     });
 
-    $('#btnRefresh').addEventListener('click', function () { refreshPrice(false); });
+    $('#btnRefresh').addEventListener('click', function () { refreshPrice(false); ensureDaily(true); });
     $('#btnCalib').addEventListener('click', calibrate);
+    $('#rangeSlider').addEventListener('input', function () {
+      var i = parseInt($('#rangeSlider').value, 10);
+      if (!isFinite(i)) i = 5;
+      state.settings.rangeIdx = i;
+      writeLS(K.set, state.settings);
+      syncRangeUI();
+      renderChart();
+    });
     $('#btnSettings').addEventListener('click', openSettings);
     $('#btnSync').addEventListener('click', function () {
       if (!state.sync.token || !state.sync.gistId) { openSettings(); toast('先配置云同步'); return; }
@@ -1413,8 +1587,10 @@ input,select,textarea{font:inherit;color:inherit}
   /* ---------------- 启动 ---------------- */
   function boot() {
     bind();
+    syncRangeUI();
     renderAll();
     refreshPrice(true);
+    ensureDaily();
     if (state.sync.token && state.sync.gistId) doSync(true);
     setInterval(function () { if (!document.hidden) refreshPrice(true); }, 5 * 60 * 1000);
 
