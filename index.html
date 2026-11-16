@@ -265,6 +265,7 @@ input,select,textarea{font:inherit;color:inherit}
   <div class="topbar">
     <div class="brand"><span class="logo">Au</span>黄金账本</div>
     <div class="actions">
+      <button class="icon-btn" id="btnReload" title="重新加载">↻</button>
       <button class="icon-btn" id="btnSync" title="云同步">☁</button>
       <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
     </div>
@@ -452,6 +453,10 @@ input,select,textarea{font:inherit;color:inherit}
       </label>
       <label class="field"><span>Gist ID</span>
         <input id="sGist" placeholder="留空则点下面「创建」自动生成" autocomplete="off">
+      </label>
+      <button type="button" class="btn sm" id="btnCopyCfg" style="width:100%;margin-bottom:12px">复制同步配置（换设备用）</button>
+      <label class="field"><span>从别的设备搬配置</span>
+        <input id="sSyncPaste" placeholder="把复制来的字符串粘这里，自动填好上面两栏" autocomplete="off">
       </label>
       <div class="row2" style="margin-bottom:12px">
         <button type="button" class="btn sm" id="btnGistCreate" style="flex:1">新建云存档</button>
@@ -711,7 +716,7 @@ input,select,textarea{font:inherit;color:inherit}
     } else if (!s.gistId) {
       cls += ' err'; txt = '缺 Gist ID · 点下方「新建云存档」自动生成';
     } else if (s.lastErr) {
-      cls += ' err'; txt = '同步失败：' + s.lastErr;
+      cls += ' err'; txt = '同步出错：' + s.lastErr;
     } else if (s.lastAt) {
       cls += ' ok'; txt = '已连接 · ' + timeAgo(s.lastAt) + '同步过';
     } else {
@@ -890,6 +895,24 @@ input,select,textarea{font:inherit;color:inherit}
     });
     if (cur.length) segs.push(cur);
     return segs;
+  }
+
+  /* ---- 阶梯线平滑：把每个「跳变」摊成一个 S 形过渡，平台保留 ---- */
+  function stepCurve(seg, fx, fy, halfW, endX) {
+    if (!seg.length) return '';
+    var d = 'M' + fx(seg[0].t).toFixed(1) + ',' + fy(seg[0].v).toFixed(1);
+    for (var i = 1; i < seg.length; i++) {
+      var x0 = fx(seg[i - 1].t), x1 = fx(seg[i].t);
+      var y0 = fy(seg[i - 1].v), y1 = fy(seg[i].v);
+      var w = Math.min(halfW, Math.max(0, (x1 - x0) / 2));
+      if (w < 0.5) { d += 'L' + x1.toFixed(1) + ',' + y1.toFixed(1); continue; }
+      d += 'L' + (x1 - w).toFixed(1) + ',' + y0.toFixed(1);
+      d += 'C' + (x1 - w / 3).toFixed(1) + ',' + y0.toFixed(1) + ' ' +
+                 (x1 + w / 3).toFixed(1) + ',' + y1.toFixed(1) + ' ' +
+                 (x1 + w).toFixed(1) + ',' + y1.toFixed(1);
+    }
+    if (endX != null) d += 'L' + endX.toFixed(1) + ',' + fy(seg[seg.length - 1].v).toFixed(1);
+    return d;
   }
 
   /* ---- 平滑曲线：Catmull-Rom 转三次贝塞尔 ---- */
@@ -1093,13 +1116,8 @@ input,select,textarea{font:inherit;color:inherit}
     /* ---- 持仓均价：紫罗兰细线 + 台阶 ---- */
     chartHover = [];
     segs.forEach(function (seg, si) {
-      var path = '';
-      seg.forEach(function (p, i) {
-        var px = X(p.t).toFixed(1), py = Y(p.v).toFixed(1);
-        if (i === 0) path += 'M' + px + ',' + py;
-        else path += 'L' + px + ',' + Y(seg[i - 1].v).toFixed(1) + 'L' + px + ',' + py;
-      });
-      if (si === segs.length - 1 && openPos) path += 'L' + (W - PR) + ',' + Y(seg[seg.length - 1].v).toFixed(1);
+      var endX = (si === segs.length - 1 && openPos) ? (W - PR) : null;
+      var path = stepCurve(seg, X, Y, 10, endX);
       svg += '<path d="' + path + '" fill="none" stroke="#fff" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" opacity=".9" vector-effect="non-scaling-stroke"/>';
       svg += '<path d="' + path + '" fill="none" stroke="#6A4C93" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
       seg.forEach(function (p) {
@@ -1557,7 +1575,7 @@ input,select,textarea{font:inherit;color:inherit}
       })
       .catch(function (e) {
         syncing = false;
-        state.sync.lastErr = e && e.message ? e.message : '失败';
+        state.sync.lastErr = friendlyErr(e && e.message);
         saveSync();
         renderSyncState();
         toast('同步失败：' + state.sync.lastErr);
@@ -1575,10 +1593,22 @@ input,select,textarea{font:inherit;color:inherit}
     return gh('/gists/' + state.sync.gistId, { method: 'PATCH', body: body });
   }
 
+  function friendlyErr(msg) {
+    var m = String(msg || '');
+    if (/401|Bad credentials/i.test(m)) return '令牌无效或没复制完整 —— 去 GitHub 重新生成';
+    if (/403|not accessible/i.test(m)) return '令牌没有 gist 权限 —— 重新生成时只勾 gist';
+    if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return '连不上 GitHub API —— 网络被拦或超时';
+    if (/404|Not Found/i.test(m)) return 'Gist 不存在 —— 可能已被删除，重新「新建云存档」';
+    if (/409|already exists/i.test(m)) return '这个 Gist 已存在，直接点「立即同步」';
+    return m;
+  }
+
   function createGist() {
     // 直接读输入框，避免用户没点「保存设置」时令牌还没进 state
     state.sync.token = ($('#sToken').value || '').trim();
     if (!state.sync.token) { toast('请先填 GitHub Token'); return; }
+    state.sync.lastErr = '';
+    renderSyncState();
     $('#btnGistCreate').textContent = '创建中…';
     var body = JSON.stringify({
       description: '黄金账本 gold-ledger 数据（建议设为 secret gist）',
@@ -1600,7 +1630,13 @@ input,select,textarea{font:inherit;color:inherit}
           function () { toast('云存档已创建（上传失败，稍后点「立即同步」）'); }
         );
       })
-      .catch(function (e) { toast('创建失败：' + e.message); })
+      .catch(function (e) {
+        var msg = friendlyErr(e && e.message);
+        state.sync.lastErr = msg;
+        saveSync();
+        renderSyncState();
+        toast('创建失败：' + msg);
+      })
       .then(function () { $('#btnGistCreate').textContent = '新建云存档'; });
   }
 
@@ -1690,6 +1726,7 @@ input,select,textarea{font:inherit;color:inherit}
     });
 
     $('#btnRefresh').addEventListener('click', function () { refreshPrice(false); ensureDaily(true); });
+    $('#btnReload').addEventListener('click', function () { location.reload(); });
     $('#btnCalib').addEventListener('click', calibrate);
     $('#rangeSlider').addEventListener('input', function () {
       var i = parseInt($('#rangeSlider').value, 10);
@@ -1713,8 +1750,41 @@ input,select,textarea{font:inherit;color:inherit}
       saveSync();
       doSync(false);
     });
-    $('#btnExport').addEventListener('click', exportJSON);
-    $('#btnCsv').addEventListener('click', exportCSV);
+    /* 换设备：复制 / 粘贴同步配置 */
+    $('#btnCopyCfg').addEventListener('click', function () {
+      var t = ($('#sToken').value || '').trim();
+      var g = ($('#sGist').value || '').trim();
+      if (!t || !g) { toast('先把 Token 和 Gist ID 都填好'); return; }
+      var str = t + '|' + g;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(str).then(function () {
+          toast('已复制，发到手机上粘贴即可');
+        }, function () {
+          window.prompt('手动复制这段：', str);
+        });
+      } else {
+        window.prompt('手动复制这段：', str);
+      }
+    });
+    $('#sSyncPaste').addEventListener('input', function () {
+      var v = ($('#sSyncPaste').value || '').trim();
+      if (v.indexOf('|') < 0) return;
+      var parts = v.split('|');
+      var t = (parts[0] || '').trim();
+      var g = (parts[1] || '').trim();
+      if (!/^(ghp_|github_pat_)/.test(t) || !g) { toast('格式不对，应该像 ghp_xxx|GistID'); return; }
+      $('#sToken').value = t;
+      $('#sGist').value = g;
+      $('#sSyncPaste').value = '';
+      state.sync.token = t;
+      state.sync.gistId = g;
+      state.sync.lastErr = '';
+      saveSync();
+      renderSyncState();
+      toast('已填入，点「保存设置」再点「立即同步」');
+    });
+
+    $('#btnExport').addEventListener('click', exportJSON);    $('#btnCsv').addEventListener('click', exportCSV);
     $('#btnImport').addEventListener('click', function () { $('#fileImport').click(); });
     $('#fileImport').addEventListener('change', function (e) {
       var f = e.target.files && e.target.files[0];
