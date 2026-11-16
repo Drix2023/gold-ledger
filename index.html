@@ -109,9 +109,18 @@ input,select,textarea{font:inherit;color:inherit}
 .stat .v{font-size:21px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums;letter-spacing:-.02em;color:var(--ink);line-height:1.2}
 .stat .s{font-size:11.5px;color:var(--ink3);margin-top:3px}
 
-.stat.hero{grid-column:1/-1;background:linear-gradient(160deg,#FDF3E8,#FBEDDF);border-color:#F2DFC9}
+.stat.hero{grid-column:1/-1;background:linear-gradient(160deg,#FDF3E8,#FBEDDF);border-color:#F2DFC9;transition:background .25s,border-color .25s}
 .stat.hero .k{color:var(--accent-deep)}
-.stat.hero .v{font-size:34px;color:var(--amber)}
+.stat.hero .v{font-size:34px;color:var(--amber);transition:color .25s}
+/* 浮盈 → 红；浮亏 → 绿（A股习惯） */
+.stat.hero.is-gain{background:linear-gradient(160deg,#FDEDE7,#F9DCD2);border-color:#F1C9BA}
+.stat.hero.is-gain .k{color:#A8400F}
+.stat.hero.is-gain .v{color:#BC3A08}
+.stat.hero.is-gain .badge{background:#FADFD5;color:#B93A08;border-color:#F1C9BA}
+.stat.hero.is-loss{background:linear-gradient(160deg,#E9F5EB,#D8EBDE);border-color:#C4E1CB}
+.stat.hero.is-loss .k{color:#2F6B3F}
+.stat.hero.is-loss .v{color:#23713A}
+.stat.hero.is-loss .badge{background:#D6EBDC;color:#23713A;border-color:#C0E0C8}
 
 .stat.wide{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:10px}
 .stat.wide .v{margin-top:0}
@@ -121,7 +130,19 @@ input,select,textarea{font:inherit;color:inherit}
 .flat{color:var(--ink2)!important}
 
 /* ---------- 图表 ---------- */
-.chart-card{padding:12px 10px 8px}
+.chart-card{padding:12px 10px 8px;position:relative}
+.chart-guide{position:absolute;width:1px;background:rgba(120,80,50,.3);pointer-events:none;z-index:3}
+.chart-tip{
+  position:absolute;z-index:4;pointer-events:none;background:#fff;
+  border:1px solid var(--line2);border-radius:11px;padding:8px 12px;
+  font-size:11.5px;line-height:1.5;white-space:nowrap;
+  box-shadow:0 10px 24px -12px rgba(90,60,35,.65);transform:translateX(-50%);
+}
+.chart-tip .t1{color:var(--ink3);font-size:11px}
+.chart-tip .t2{font-weight:700;font-size:13.5px;margin-top:1px;color:var(--ink)}
+.chart-tip .t2.buy{color:#A6552A}
+.chart-tip .t2.sell{color:#3F6B4A}
+.chart-tip .t3{color:var(--ink2);font-size:11px;margin-top:1px}
 #chart{display:block;width:100%}
 #chart .empty{padding:46px 18px;text-align:center;color:var(--ink3);font-size:13px;line-height:1.9}
 #chart .empty b{font-weight:700}
@@ -265,7 +286,7 @@ input,select,textarea{font:inherit;color:inherit}
 
   <!-- 统计 -->
   <section class="stats" id="stats">
-    <div class="stat hero">
+    <div class="stat hero" id="heroCard">
       <div class="k">持仓均价 <span class="badge" id="avgHint"></span></div>
       <div class="v" id="sAvg">—</div>
       <div class="s" id="sAvgSub">—</div>
@@ -301,6 +322,8 @@ input,select,textarea{font:inherit;color:inherit}
   <div class="sec-title"><b>金价走势</b><span id="chartHint">本地采样</span></div>
   <section class="card chart-card">
     <div id="chart"></div>
+    <div class="chart-guide" id="chartGuide" hidden></div>
+    <div class="chart-tip" id="chartTip" hidden></div>
     <div class="chart-tools">
       <span class="rt-cap">区间</span>
       <input type="range" id="rangeSlider" min="0" max="11" step="1" value="5" aria-label="显示区间">
@@ -676,13 +699,16 @@ input,select,textarea{font:inherit;color:inherit}
 
     $('#sAvg').textContent = s.grams > 0 ? money(s.avgCost) : '—';
     var diff = hasSpot && s.avgCost > 0 ? (s.spot - s.avgCost) / s.avgCost : 0;
+    var hero = $('#heroCard');
+    if (hero && hero.classList) hero.classList.remove('is-gain', 'is-loss');
     if (s.grams > 0 && hasSpot && s.avgCost > 0) {
       var above = s.spot >= s.avgCost;
+      if (hero && hero.classList) hero.classList.add(above ? 'is-gain' : 'is-loss');
       $('#sAvgSub').innerHTML =
         '<span class="' + (above ? 'up' : 'dn') + '">现价 ' + (above ? '高' : '低') + '于均价 ' +
         fmt(Math.abs(diff) * 100, 2) + '%</span>';
       $('#avgHint').textContent = above ? '浮盈' : '浮亏';
-      $('#avgHint').className = 'badge' + (above ? '' : ' warn');
+      $('#avgHint').className = 'badge';
     } else {
       $('#sAvgSub').textContent = s.grams > 0 ? '等待金价' : '还没有持仓';
       $('#avgHint').textContent = '';
@@ -825,12 +851,89 @@ input,select,textarea{font:inherit;color:inherit}
       var t = recTimestamp(r.date);
       if (g > 0) {
         var v = cost / g;
-        if (cur.length && Math.abs(cur[cur.length - 1].t - t) < 1000) cur[cur.length - 1].v = v;
-        else cur.push({ t: t, v: v });
+        if (cur.length && Math.abs(cur[cur.length - 1].t - t) < 1000) {
+          cur[cur.length - 1].v = v;
+          cur[cur.length - 1].r = r;
+        } else {
+          cur.push({ t: t, v: v, r: r });
+        }
       } else if (cur.length) { segs.push(cur); cur = []; }
     });
     if (cur.length) segs.push(cur);
     return segs;
+  }
+
+  /* ---- 平滑曲线：Catmull-Rom 转三次贝塞尔 ---- */
+  function smoothPath(pts, top, bottom) {
+    if (!pts.length) return '';
+    if (pts.length < 3) {
+      var s = '';
+      for (var k = 0; k < pts.length; k++) s += (k ? 'L' : 'M') + pts[k].x.toFixed(1) + ',' + pts[k].y.toFixed(1);
+      return s;
+    }
+    var T = 0.85;
+    function clampY(y) { return Math.max(top, Math.min(bottom, y)); }
+    var d = 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
+    for (var i = 0; i < pts.length - 1; i++) {
+      var p0 = pts[i - 1] || pts[i];
+      var p1 = pts[i];
+      var p2 = pts[i + 1];
+      var p3 = pts[i + 2] || p2;
+      var c1x = p1.x + (p2.x - p0.x) / 6 * T;
+      var c1y = clampY(p1.y + (p2.y - p0.y) / 6 * T);
+      var c2x = p2.x - (p3.x - p1.x) / 6 * T;
+      var c2y = clampY(p2.y - (p3.y - p1.y) / 6 * T);
+      d += 'C' + c1x.toFixed(1) + ',' + c1y.toFixed(1) + ' ' +
+                   c2x.toFixed(1) + ',' + c2y.toFixed(1) + ' ' +
+                   p2.x.toFixed(1) + ',' + p2.y.toFixed(1);
+    }
+    return d;
+  }
+
+  /* ---- 悬停提示 ---- */
+  var chartHover = [];
+  function hideTip() {
+    var t = $('#chartTip'), g = $('#chartGuide');
+    if (t) t.hidden = true;
+    if (g) g.hidden = true;
+  }
+  function showTip(ev, svg) {
+    var tip = $('#chartTip'), guide = $('#chartGuide');
+    var card = document.querySelector('.chart-card');
+    if (!tip || !guide || !card || !chartHover.length) return;
+    var sr = svg.getBoundingClientRect();
+    var cr = card.getBoundingClientRect();
+    if (!sr || !cr || !sr.width) return;
+
+    var sx = (ev.clientX - sr.left) / sr.width * 680;
+    var best = null, bd = 1e9;
+    for (var i = 0; i < chartHover.length; i++) {
+      var dd = Math.abs(chartHover[i].x - sx);
+      if (dd < bd) { bd = dd; best = chartHover[i]; }
+    }
+    if (!best || bd > 30) { hideTip(); return; }
+
+    var px = (best.x / 680) * sr.width + (sr.left - cr.left);
+    var py = (best.y / 210) * sr.height + (sr.top - cr.top);
+
+    guide.hidden = false;
+    guide.style.left = px.toFixed(1) + 'px';
+    guide.style.top = (sr.top - cr.top).toFixed(1) + 'px';
+    guide.style.height = sr.height.toFixed(1) + 'px';
+
+    var r = best.r;
+    tip.innerHTML =
+      '<div class="t1">' + esc(r.date) + ' · ' + (r.side === 'buy' ? '买入' : '卖出') + '</div>' +
+      '<div class="t2 ' + r.side + '">' + fmt(num(r.price), 2) + ' 元/克</div>' +
+      '<div class="t3">' + gfmt(num(r.grams)) + ' g · 共 ' + money(num(r.grams) * num(r.price) + (r.side === 'buy' ? num(r.fee) : 0)) + '</div>';
+    tip.hidden = false;
+
+    var tw = tip.offsetWidth || 120, th = tip.offsetHeight || 52;
+    var left = Math.min(Math.max(px, tw / 2 + 4), Math.max(4, cr.width - tw / 2 - 4));
+    tip.style.left = left.toFixed(1) + 'px';
+    var top = py - th - 12;
+    if (top < 2) top = py + 16;
+    tip.style.top = top.toFixed(1) + 'px';
   }
 
   /* ---- 时间窗档位 ---- */
@@ -897,14 +1000,10 @@ input,select,textarea{font:inherit;color:inherit}
     function clipSeg(seg, isOpen) {
       if (!seg || !seg.length) return [];
       var lastP = seg[seg.length - 1];
-      /* 这段已经清仓收尾，窗口内不再有持仓 */
-      if (lastP.t < t0) {
-        /* 但如果它是「当前仍持有」的最后一段，均价会一直延续到今天 */
-        return isOpen ? [{ t: t0, v: lastP.v }] : [];
-      }
+      if (lastP.t < t0) return isOpen ? [{ t: t0, v: lastP.v }] : [];
       var out = [], i, active = null;
       for (i = 0; i < seg.length; i++) { if (seg[i].t <= t0) active = seg[i]; else break; }
-      if (active) out.push({ t: t0, v: active.v });
+      if (active) out.push({ t: t0, v: active.v, r: active.r });
       for (i = 0; i < seg.length; i++) if (seg[i].t > t0 && seg[i].t <= t1) out.push(seg[i]);
       return out;
     }
@@ -934,7 +1033,7 @@ input,select,textarea{font:inherit;color:inherit}
     var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
     svg += '<defs>' +
       '<linearGradient id="gFill" x1="0" y1="0" x2="0" y2="1">' +
-        '<stop offset="0%" stop-color="#C2703D" stop-opacity=".20"/>' +
+        '<stop offset="0%" stop-color="#C2703D" stop-opacity=".18"/>' +
         '<stop offset="100%" stop-color="#E0A15E" stop-opacity="0"/>' +
       '</linearGradient>' +
       '<linearGradient id="gLine" x1="0" y1="0" x2="1" y2="0">' +
@@ -949,20 +1048,21 @@ input,select,textarea{font:inherit;color:inherit}
              '" stroke="#F4EAE0" stroke-width="1"' + (k === 3 ? '' : ' stroke-dasharray="3 5"') + '/>';
     }
 
-    /* ---- 金价（陶土橙） ---- */
-    if (price.length >= 2) {
-      var d = '';
-      price.forEach(function (p, i) { d += (i ? 'L' : 'M') + X(p.t).toFixed(1) + ',' + Y(p.c).toFixed(1); });
-      var xa = X(price[0].t).toFixed(1), xb = X(price[price.length - 1].t).toFixed(1);
-      svg += '<path d="' + d + 'L' + xb + ',' + (PT + ih) + 'L' + xa + ',' + (PT + ih) + 'Z" fill="url(#gFill)"/>';
-      svg += '<path d="' + d + '" fill="none" stroke="url(#gLine)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+    /* ---- 金价：细线 + 平滑 ---- */
+    var pxy = price.map(function (p) { return { x: X(p.t), y: Y(p.c) }; });
+    if (pxy.length >= 2) {
+      var dp = smoothPath(pxy, PT, PT + ih);
+      var xa = pxy[0].x.toFixed(1), xb = pxy[pxy.length - 1].x.toFixed(1);
+      svg += '<path d="' + dp + 'L' + xb + ',' + (PT + ih) + 'L' + xa + ',' + (PT + ih) + 'Z" fill="url(#gFill)"/>';
+      svg += '<path d="' + dp + '" fill="none" stroke="url(#gLine)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
     }
-    if (price.length >= 1) {
-      var lp = price[price.length - 1];
-      svg += '<circle cx="' + X(lp.t).toFixed(1) + '" cy="' + Y(lp.c).toFixed(1) + '" r="4.5" fill="#C2703D" stroke="#fff" stroke-width="2"/>';
+    if (pxy.length >= 1) {
+      var lastPx = pxy[pxy.length - 1];
+      svg += '<circle cx="' + lastPx.x.toFixed(1) + '" cy="' + lastPx.y.toFixed(1) + '" r="3.2" fill="#C2703D" stroke="#fff" stroke-width="1.6"/>';
     }
 
-    /* ---- 持仓均价（墨青，实线 + 台阶 + 落点） ---- */
+    /* ---- 持仓均价：紫罗兰细线 + 台阶 ---- */
+    chartHover = [];
     segs.forEach(function (seg, si) {
       var path = '';
       seg.forEach(function (p, i) {
@@ -971,10 +1071,13 @@ input,select,textarea{font:inherit;color:inherit}
         else path += 'L' + px + ',' + Y(seg[i - 1].v).toFixed(1) + 'L' + px + ',' + py;
       });
       if (si === segs.length - 1 && openPos) path += 'L' + (W - PR) + ',' + Y(seg[seg.length - 1].v).toFixed(1);
-      svg += '<path d="' + path + '" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" opacity=".92" vector-effect="non-scaling-stroke"/>';
-      svg += '<path d="' + path + '" fill="none" stroke="#1F6F6B" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+      svg += '<path d="' + path + '" fill="none" stroke="#fff" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" opacity=".9" vector-effect="non-scaling-stroke"/>';
+      svg += '<path d="' + path + '" fill="none" stroke="#6A4C93" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
       seg.forEach(function (p) {
-        svg += '<circle cx="' + X(p.t).toFixed(1) + '" cy="' + Y(p.v).toFixed(1) + '" r="3.6" fill="#1F6F6B" stroke="#fff" stroke-width="1.8"/>';
+        if (!p.r) return;
+        var cx = X(p.t), cy = Y(p.v);
+        svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="3" fill="#6A4C93" stroke="#fff" stroke-width="1.6"/>';
+        chartHover.push({ x: cx, y: cy, r: p.r });
       });
     });
     svg += '</svg>';
@@ -991,7 +1094,7 @@ input,select,textarea{font:inherit;color:inherit}
     }
     if (segs.length) {
       var lastSeg = segs[segs.length - 1];
-      lg += '<span><i style="background:#1F6F6B"></i>持仓均价 <b>' + fmt(lastSeg[lastSeg.length - 1].v, 2) + '</b></span>';
+      lg += '<span><i style="background:#6A4C93"></i>持仓均价 <b>' + fmt(lastSeg[lastSeg.length - 1].v, 2) + '</b></span>';
     }
     lg += '</div>';
     el.innerHTML = out + lg;
@@ -999,6 +1102,15 @@ input,select,textarea{font:inherit;color:inherit}
       el.innerHTML += '<div class="chart-note">金价曲线已整体平移到你的报价水平（沪金主连 ' +
         (state.lastShift > 0 ? '+' : '') + fmt(state.lastShift, 2) + ' 元/克），这样两条线才能直接比盈亏</div>';
     }
+
+    /* ---- 绑定悬停 ---- */
+    var svgEl = el.querySelector('svg');
+    if (svgEl && svgEl.addEventListener) {
+      svgEl.addEventListener('pointermove', function (ev) { showTip(ev, svgEl); });
+      svgEl.addEventListener('pointerleave', hideTip);
+      svgEl.addEventListener('pointercancel', hideTip);
+    }
+    if (typeof hideTip === 'function') hideTip();
   }
 
   /* ---------------- 渲染：记录 ---------------- */
